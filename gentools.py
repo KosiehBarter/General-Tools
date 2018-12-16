@@ -19,6 +19,11 @@ from sys import stdout as SYSSTDOUT
 from socket import AF_INET, SOCK_STREAM, SOL_SOCKET, SO_REUSEADDR
 from socket import socket as SoSocket
 
+# JSON
+from json import loads as JSLoads
+from json import dumps as JSDumps
+
+
 # Main load ini
 def load_ini(in_ini, section = None):
     config = cp_CP()
@@ -43,6 +48,10 @@ def initialize(in_obj, init_list, inifile='config.ini'):
         if hasattr(getattr(in_obj, initobj), '_pre_initialize'):
             getattr(in_obj, initobj)._pre_initialize(in_obj.logger)
 
+        # Socket-only, if server
+        if hasattr(getattr(in_obj, initobj), 'server') and hasattr(in_obj, 'server'):
+            getattr(in_obj, initobj).server = getattr(in_obj, 'server')
+
         # normally, initialize it
         getattr(in_obj, initobj)._initialize(inifile)
         
@@ -64,6 +73,35 @@ def initialize(in_obj, init_list, inifile='config.ini'):
         else:
             in_obj.logger.critical(in_obj.desc + "FAILED to initialize: %s: %s" % (getattr(in_obj, initobj).desc, getattr(in_obj, initobj).error))
 
+
+class DataContainer(object):
+    """
+        Data container 
+    """
+    def __init__(self):
+        self._ready = False
+
+        self._attr_list = []
+        self._payload = ''
+
+    def _decode(self, in_json):
+        tmp_data = JSLoads(in_json)
+        for key in tmp_data.keys():
+            setattr(self, key, tmp_data.get(key))
+            self._attr_list.append(key)
+    
+    def _encode(self):
+        tmp_dict = dict()
+        for attr in dir(self):
+            if not attr[0] == '_':
+                tmp_dict[attr] = getattr(self, attr)
+                delattr(self, attr)
+        
+        self._attr_list = []
+        self._payload = JSDumps(tmp_dict)
+        del tmp_dict
+        # make the datacontainer ready
+        self._ready = True
 
 # General Logging Daemon for almost everything
 class SystemdHandler(LOGH):
@@ -111,7 +149,6 @@ class Logger(object):
 # SOCKET for general usage
 class Socket(object):
     def __init__(self):
-
         # Logging
         self.logger = None
         self.desc = "SOCK_COMM: "
@@ -120,18 +157,19 @@ class Socket(object):
         # socket related
         self.socket = None
         self.size = None
+        self.server = False
 
     def _pre_initialize(self, master_logger):
         self.logger = master_logger
 
-    def _initialize(self, in_ini = 'config.ini', server = True):
+    def _initialize(self, in_ini = 'config.ini'):
         self.logger.info(self.desc + 'starting initialization')
         if self.size is None:
             data_dict = load_ini(in_ini, 'SOCKET')
             self.size = int(data_dict['size'])
 
         # Server-only
-        if server:
+        if self.server:
             self.socket = SoSocket(AF_INET, SOCK_STREAM)
             try:
                 self.logger.info(self.desc + 'starting server socket')
@@ -147,7 +185,7 @@ class Socket(object):
         # Client only, supports reinitialize
         else:
             self.logger.info(self.desc + "starting client socket")
-            if not hasattr(self, 'server') and not hasattr(self, 'port'):
+            if not hasattr(self, 'server') and not hasattr(self, 'port') or type(self.server) == bool:
                 data_dict = load_ini(in_ini, 'CLIENT')
                 setattr(self, 'server', data_dict['server'])
                 setattr(self, 'port', int(data_dict['port']))
